@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::spawn;
 
+pub mod sync_reader;
+
 struct SearchPool {
     candidates: Mutex<(usize, Vec<PathBuf>)>,
     results: Mutex<Vec<PathBuf>>,
