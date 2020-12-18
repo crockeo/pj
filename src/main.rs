@@ -10,9 +10,6 @@ struct SearchPool {
     candidates: Mutex<(usize, Vec<PathBuf>)>,
     results: Mutex<Vec<PathBuf>>,
     target: String,
-
-    // work_change signifies a situation in which a worker thread waiting on `get_candidate` should
-    // wake up and check its conditions;
     work_change: Condvar,
 }
 
