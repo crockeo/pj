@@ -1,58 +1,56 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
-use std::thread;
 
-trait SyncStream {
+pub trait SyncStream {
     type Item;
 
-    /// put adds a new item to the stream.
+    fn with_writers(writer_count: usize) -> Self;
+
     fn put(&self, value: Self::Item);
-
-    /// end signifies an end of the stream. Remaining items that were previously inserted with put
-    /// will be flushed before notifying consuming threads that there are no more items remaining.
-    fn end(&self);
-
-    /// get retrieves a value from the SyncWriteReader. When no value exists, but the stream hasn't
-    /// ended (signified by a call to end), get blocks. If the stream has ended *and there are no
-    /// remaining values* get returns None instead.
+    fn end(&self) -> bool;
     fn get(&self) -> Option<Self::Item>;
 }
 
 struct MutexSyncStreamState<T> {
-    is_over: bool,
+    writer_count: usize,
+    ended_count: usize,
     elements: Vec<T>,
 }
 
 impl<T> MutexSyncStreamState<T> {
-    fn new() -> Self {
+    fn is_over(&self) -> bool {
+        self.ended_count >= self.writer_count
+    }
+}
+
+impl<T> MutexSyncStreamState<T> {
+    fn with_writers(writer_count: usize) -> Self {
         Self {
-            is_over: false,
+            writer_count: writer_count,
+            ended_count: 0,
             elements: Vec::new(),
         }
     }
 }
 
 /// A naive always-locking implementation of a SyncStream.
-struct MutexSyncStream<T> {
+pub struct MutexSyncStream<T> {
     state: Mutex<MutexSyncStreamState<T>>,
     state_change: Condvar,
-}
-
-impl<T> MutexSyncStream<T> {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(MutexSyncStreamState::<T>::new()),
-            state_change: Condvar::new(),
-        }
-    }
 }
 
 impl<T> SyncStream for MutexSyncStream<T> {
     type Item = T;
 
+    fn with_writers(writer_count: usize) -> Self {
+        Self {
+            state: Mutex::new(MutexSyncStreamState::with_writers(writer_count)),
+            state_change: Condvar::new(),
+        }
+    }
+
     fn put(&self, value: Self::Item) {
         let mut state = self.state.lock().unwrap();
-        if state.is_over {
+        if state.is_over() {
             panic!("attempted to write to stream after it was closed");
         }
 
@@ -60,28 +58,29 @@ impl<T> SyncStream for MutexSyncStream<T> {
         self.state_change.notify_one();
     }
 
-    fn end(&self) {
+    fn end(&self) -> bool {
         let mut state = self.state.lock().unwrap();
-        if state.is_over {
+        if state.is_over() {
             panic!("attempting to end a stream twice");
         }
-        state.is_over = true;
-        self.state_change.notify_all();
+
+        state.ended_count += 1;
+        loop {
+            if state.is_over() {
+                self.state_change.notify_all();
+                return true;
+            } else if state.elements.len() > 0 {
+                state.ended_count -= 1;
+                return false;
+            } else {
+                state = self.state_change.wait(state).unwrap();
+            }
+        }
     }
 
     fn get(&self) -> Option<Self::Item> {
         let mut state = self.state.lock().unwrap();
-        state = self
-            .state_change
-            .wait_while(state, |state| {
-                !(*state).is_over && state.elements.len() == 0
-            })
-            .unwrap();
-        if state.is_over {
-            None
-        } else {
-            state.elements.pop()
-        }
+        state.elements.pop()
     }
 }
 
@@ -108,6 +107,7 @@ mod tests {
                 for j in min..max {
                     sync_stream.as_ref().put(j);
                 }
+                sync_stream.end();
             }));
         }
 
@@ -127,7 +127,6 @@ mod tests {
         for write_handle in write_handles.into_iter() {
             write_handle.join().expect("failed to unwrap write handles");
         }
-        sync_stream.as_ref().end();
 
         let mut seen_values = vec![0; 1000];
         for read_handle in read_handles.into_iter() {
@@ -144,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_mutex_sync_stream() {
-        let ss = MutexSyncStream::<i64>::new();
+        let ss = MutexSyncStream::<i64>::with_writers(2);
         run_sync_stream_test(ss);
     }
 }

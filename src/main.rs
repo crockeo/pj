@@ -1,118 +1,58 @@
 extern crate num_cpus;
 
-use std::env;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::spawn;
-
 pub mod sync_reader;
 
-struct SearchPool {
-    candidates: Mutex<(usize, Vec<PathBuf>)>,
-    results: Mutex<Vec<PathBuf>>,
-    target: String,
-    work_change: Condvar,
-}
+use std::env;
+use std::io;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
 
-impl SearchPool {
-    fn new<S: AsRef<str>, P: AsRef<Path>>(search_target: S, root_path: P) -> SearchPool {
-        SearchPool {
-            candidates: Mutex::new((0, vec![root_path.as_ref().to_owned()])),
-            results: Mutex::new(vec![]),
-            target: search_target.as_ref().to_owned(),
-            work_change: Condvar::new(),
-        }
-    }
+use crate::sync_reader::SyncStream;
 
-    fn get_candidate(&self) -> Option<PathBuf> {
-        let mut candidates_guard = self.candidates.lock().unwrap();
+fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
+    target: Arc<String>,
+    sync_stream: Arc<T>,
+) -> io::Result<Vec<PathBuf>> {
+    let mut found_paths = Vec::new();
+    loop {
+        while let Some(path_buf) = sync_stream.get() {
+            let mut candidate_subpaths: Vec<PathBuf> = Vec::new();
+            let mut found_sentinel = false;
 
-        candidates_guard.0 += 1;
-        while candidates_guard.0 < num_cpus::get() && candidates_guard.1.len() == 0 {
-            candidates_guard = self.work_change.wait(candidates_guard).unwrap();
-        }
+            for sub_path in path_buf.read_dir()? {
+                let sub_path = sub_path?.path();
 
-        if candidates_guard.1.len() > 0 {
-            candidates_guard.0 -= 1;
-            candidates_guard.1.pop()
-        } else {
-            self.work_change.notify_one();
-            None
-        }
-    }
+                let file_name = sub_path
+                    .as_path()
+                    .file_name()
+                    .expect("failed to get file name")
+                    .to_str()
+                    .expect("failed to convert OsStr->str");
+                if file_name == target.as_ref() {
+                    found_paths.push(sub_path);
+                    found_sentinel = true;
+                    break;
+                }
 
-    fn extend_candidates(&self, paths: Vec<PathBuf>) {
-        let mut candidates_guard = self.candidates.lock().unwrap();
-        candidates_guard.1.extend(paths);
-        self.work_change.notify_all();
-    }
-
-    fn put_result(&self, path: PathBuf) {
-        self.results.lock().unwrap().push(path);
-    }
-
-    fn is_target<P: AsRef<Path>>(&self, path: P) -> io::Result<bool> {
-        let file_name = path
-            .as_ref()
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid file name"))?;
-        Ok(file_name == self.target)
-    }
-
-    fn find_sentinel_dirs(self) -> io::Result<Vec<PathBuf>> {
-        let self_arc = Arc::new(self);
-
-        let core_count = num_cpus::get();
-        let mut children = Vec::with_capacity(core_count);
-        for _ in 0..core_count {
-            let self_arc = self_arc.clone();
-            children.push(spawn(move || {
-                // panic if we receive an error, so it bubbles up while joining
-                // TODO: find a better way to represent this
-                worker(self_arc).unwrap();
-            }));
-        }
-
-        for child in children.into_iter() {
-            child
-                .join()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "worker thread panicked"))?;
-        }
-
-        let results = self_arc.as_ref().results.lock().unwrap().clone();
-        Ok(results)
-    }
-}
-
-fn worker(pool: Arc<SearchPool>) -> io::Result<()> {
-    while let Some(path) = pool.as_ref().get_candidate() {
-        let sub_paths: Vec<PathBuf> = path
-            .read_dir()?
-            .flat_map(|dir_entry| io::Result::<_>::Ok(dir_entry?.path()))
-            .collect();
-
-        let mut candidate_sub_paths: Vec<PathBuf> = Vec::with_capacity(sub_paths.len());
-        let mut found_sentinel = false;
-        for sub_path in sub_paths.into_iter() {
-            if pool.is_target(&sub_path)? {
-                pool.as_ref().put_result(sub_path);
-                found_sentinel = true;
-                break;
+                if sub_path.is_dir() {
+                    candidate_subpaths.push(sub_path);
+                }
             }
 
-            if sub_path.is_dir() {
-                candidate_sub_paths.push(sub_path);
+            if !found_sentinel {
+                for candidate_subpath in candidate_subpaths.into_iter() {
+                    sync_stream.put(candidate_subpath);
+                }
             }
         }
 
-        if !found_sentinel {
-            pool.as_ref().extend_candidates(candidate_sub_paths);
+        if sync_stream.end() {
+            break;
         }
     }
 
-    Ok(())
+    Ok(found_paths)
 }
 
 fn main() -> io::Result<()> {
@@ -122,7 +62,10 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    let sentinel_name = args[1].clone();
+    let sentinel_name = Arc::new(args[1].clone());
+
+    let core_count = num_cpus::get();
+    let sync_stream = Arc::new(sync_reader::MutexSyncStream::with_writers(core_count));
     let mut root_dir;
     if args.len() >= 3 {
         root_dir = PathBuf::new();
@@ -130,16 +73,23 @@ fn main() -> io::Result<()> {
     } else {
         root_dir = env::current_dir()?;
     }
+    sync_stream.as_ref().put(root_dir);
 
-    let dirs = SearchPool::new(sentinel_name, root_dir).find_sentinel_dirs()?;
-    for dir in dirs.into_iter() {
-        println!(
-            "{}",
-            dir.as_path().to_str().ok_or(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid utf-8 path name"
-            ))?
-        );
+    let mut workers = Vec::with_capacity(core_count);
+    for _ in 0..core_count {
+        let sentinel_name = sentinel_name.clone();
+        let sync_stream = sync_stream.clone();
+        workers.push(thread::spawn(move || {
+            finder_worker(sentinel_name, sync_stream)
+        }));
+    }
+
+    for path in workers.into_iter().flat_map(|w| {
+        w.join()
+            .expect("failed to join thread")
+            .expect("thread failed to execute")
+    }) {
+        println!("{}", path.to_str().expect("invalid path"));
     }
 
     Ok(())
