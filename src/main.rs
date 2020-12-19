@@ -56,7 +56,7 @@ fn main() -> io::Result<()> {
     }
 
     let core_count = num_cpus::get();
-    let sync_stream = Arc::new(sync_reader::MutexSyncStream::with_threads(core_count));
+    let sync_stream = Arc::new(sync_reader::SwapSyncStream::with_threads(core_count));
 
     let sentinel_name = Arc::new(args[1].clone());
     if args.len() == 2 {

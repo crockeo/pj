@@ -94,7 +94,7 @@ impl<T> MutexSyncStreamState<T> {
 
 /// An implementation of a SyncStream that separates the writer and reader locks, as well as
 /// provides a method to swap between them.
-struct SwapSyncStream<T> {
+pub struct SwapSyncStream<T> {
     read_state: Mutex<MutexSyncStreamState<T>>,
     write_state: Mutex<Vec<T>>,
     swap_evt: Condvar,
@@ -125,6 +125,11 @@ impl<T> SyncStream for SwapSyncStream<T> {
                     return None;
                 }
 
+                // TODO: this impl is actually slower than the Mutex, I think it's because we waste
+                // a lot of time with both the reader_ and writer_state locked to do this move.
+                // Instead we ought to:
+                //   - Represent read_state.elements as a RefCell
+                //   - Use RefCell.replace (which just swaps pointers?) to "move" data between them
                 drain_extend(&mut read_state.elements, &mut write_state);
                 self.swap_evt.notify_all();
                 continue;
@@ -146,7 +151,6 @@ impl<T> SyncStream for SwapSyncStream<T> {
 
 fn drain_extend<T>(target: &mut Vec<T>, source: &mut Vec<T>) {
     let new_len = target.len() + source.len();
-    // TODO: think about making this a larger bound--like 2x the existing capacity?
     if new_len > target.capacity() {
         target.reserve(new_len - target.capacity());
     }
