@@ -8,6 +8,14 @@ pub trait SyncStream {
     fn put(&self, value: Self::Item);
     fn end(&self) -> bool;
     fn get(&self) -> Option<Self::Item>;
+
+    // default extend assumes no special circumstances about knowing the length of the values ahead
+    // of time. can be overriden to optimize for specific implementations
+    fn extend(&self, values: Vec<Self::Item>) {
+        for value in values.into_iter() {
+            self.put(value);
+        }
+    }
 }
 
 struct MutexSyncStreamState<T> {
@@ -81,6 +89,16 @@ impl<T> SyncStream for MutexSyncStream<T> {
     fn get(&self) -> Option<Self::Item> {
         let mut state = self.state.lock().unwrap();
         state.elements.pop()
+    }
+
+    fn extend(&self, values: Vec<Self::Item>) {
+        let mut state = self.state.lock().unwrap();
+        if state.is_over() {
+            panic!("attempted to write to stream after it was closed");
+        }
+
+        state.elements.extend(values);
+        self.state_change.notify_all();
     }
 }
 

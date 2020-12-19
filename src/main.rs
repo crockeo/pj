@@ -30,7 +30,7 @@ fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
                     .to_str()
                     .expect("failed to convert OsStr->str");
                 if file_name == target.as_ref() {
-                    found_paths.push(sub_path);
+                    found_paths.push(path_buf);
                     found_sentinel = true;
                     break;
                 }
@@ -41,9 +41,7 @@ fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
             }
 
             if !found_sentinel {
-                for candidate_subpath in candidate_subpaths.into_iter() {
-                    sync_stream.put(candidate_subpath);
-                }
+                sync_stream.extend(candidate_subpaths);
             }
         }
 
