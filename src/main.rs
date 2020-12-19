@@ -16,38 +16,32 @@ fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
     sync_stream: Arc<T>,
 ) -> io::Result<Vec<PathBuf>> {
     let mut found_paths = Vec::new();
-    loop {
-        while let Some(path_buf) = sync_stream.get() {
-            let mut candidate_subpaths: Vec<PathBuf> = Vec::new();
-            let mut found_sentinel = false;
+    while let Some(path_buf) = sync_stream.get() {
+        let mut candidate_subpaths: Vec<PathBuf> = Vec::new();
+        let mut found_sentinel = false;
 
-            for sub_path in path_buf.read_dir()? {
-                let sub_path = sub_path?.path();
+        for sub_path in path_buf.read_dir()? {
+            let sub_path = sub_path?.path();
 
-                let file_name = sub_path
-                    .as_path()
-                    .file_name()
-                    .expect("failed to get file name")
-                    .to_str()
-                    .expect("failed to convert OsStr->str");
-                if file_name == target.as_ref() {
-                    found_paths.push(path_buf);
-                    found_sentinel = true;
-                    break;
-                }
-
-                if sub_path.is_dir() {
-                    candidate_subpaths.push(sub_path);
-                }
+            let file_name = sub_path
+                .as_path()
+                .file_name()
+                .expect("failed to get file name")
+                .to_str()
+                .expect("failed to convert OsStr->str");
+            if file_name == target.as_ref() {
+                found_paths.push(path_buf);
+                found_sentinel = true;
+                break;
             }
 
-            if !found_sentinel {
-                sync_stream.extend(candidate_subpaths);
+            if sub_path.is_dir() {
+                candidate_subpaths.push(sub_path);
             }
         }
 
-        if sync_stream.end() {
-            break;
+        if !found_sentinel {
+            sync_stream.extend(candidate_subpaths);
         }
     }
 
@@ -62,7 +56,7 @@ fn main() -> io::Result<()> {
     }
 
     let core_count = num_cpus::get();
-    let sync_stream = Arc::new(sync_reader::MutexSyncStream::with_writers(core_count));
+    let sync_stream = Arc::new(sync_reader::MutexSyncStream::with_threads(core_count));
 
     let sentinel_name = Arc::new(args[1].clone());
     if args.len() == 2 {
