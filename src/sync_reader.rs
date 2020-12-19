@@ -77,18 +77,26 @@ impl<T> SyncStream for MutexSyncStream<T> {
             if state.is_over() {
                 self.state_change.notify_all();
                 return true;
-            } else if state.elements.len() > 0 {
+            }
+            state = self.state_change.wait(state).unwrap();
+            if state.elements.len() > 0 {
                 state.ended_count -= 1;
                 return false;
-            } else {
-                state = self.state_change.wait(state).unwrap();
             }
         }
     }
 
     fn get(&self) -> Option<Self::Item> {
         let mut state = self.state.lock().unwrap();
-        state.elements.pop()
+        loop {
+            if state.elements.len() > 0 {
+                return state.elements.pop();
+            } else if state.is_over() {
+                self.state_change.notify_all();
+                return None;
+            }
+            state = self.state_change.wait(state).unwrap();
+        }
     }
 
     fn extend(&self, values: Vec<Self::Item>) {
@@ -102,6 +110,22 @@ impl<T> SyncStream for MutexSyncStream<T> {
     }
 }
 
+/// A lock-light implementation of a SyncStream. Attempts to use reference swapping to reduce the
+/// frequency of locking.
+struct SwapSyncStream<T> {
+    placeholder_to_remove: T,
+}
+
+impl<T> SyncStream for SwapSyncStream<T> {
+    type Item = T;
+
+    fn with_writers(writer_count: usize) -> Self { todo!() }
+
+    fn put(&self, value: Self::Item) { todo!() }
+    fn end(&self) -> bool { todo!() }
+    fn get(&self) -> Option<Self::Item> { todo!() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,10 +133,9 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    fn run_sync_stream_test<T: SyncStream<Item = i64> + Send + Sync + 'static>(sync_stream: T) {
+    fn run_sync_stream_test<T: SyncStream<Item = i64> + Send + Sync + 'static>(sync_stream: T, write_threads: i64) {
         let sync_stream = Arc::new(sync_stream);
 
-        let write_threads = 2;
         let step = 1000 / write_threads;
         let mut write_handles = Vec::new();
 
@@ -125,7 +148,8 @@ mod tests {
                 for j in min..max {
                     sync_stream.as_ref().put(j);
                 }
-                sync_stream.end();
+
+                while !sync_stream.end() {}
             }));
         }
 
@@ -154,14 +178,28 @@ mod tests {
             }
         }
 
-        for seen_value in seen_values.into_iter() {
-            assert_eq!(seen_value, 1);
+        for (i, seen_value) in seen_values.into_iter().enumerate() {
+            assert_eq!(seen_value, 1, "expected to see {} once, saw it {} time(s)", i, seen_value);
         }
     }
 
     #[test]
     fn test_mutex_sync_stream() {
-        let ss = MutexSyncStream::<i64>::with_writers(2);
-        run_sync_stream_test(ss);
+        let write_threads = 2;
+
+        for _ in 0..10 {
+            let ss = MutexSyncStream::<i64>::with_writers(write_threads);
+            run_sync_stream_test(ss, write_threads as i64);
+        }
+    }
+
+    #[test]
+    fn test_swap_sync_stream() {
+        let write_threads = 2;
+
+        for _ in 0..10 {
+            let ss = SwapSyncStream::<i64>::with_writers(write_threads);
+            run_sync_stream_test(ss, write_threads as i64);
+        }
     }
 }

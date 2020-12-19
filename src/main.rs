@@ -1,4 +1,5 @@
 extern crate num_cpus;
+extern crate shellexpand;
 
 pub mod sync_reader;
 
@@ -60,18 +61,22 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    let sentinel_name = Arc::new(args[1].clone());
-
     let core_count = num_cpus::get();
     let sync_stream = Arc::new(sync_reader::MutexSyncStream::with_writers(core_count));
-    let mut root_dir;
-    if args.len() >= 3 {
-        root_dir = PathBuf::new();
-        root_dir.push(args[2].clone());
+
+    let sentinel_name = Arc::new(args[1].clone());
+    if args.len() == 2 {
+        sync_stream.put(env::current_dir()?);
     } else {
-        root_dir = env::current_dir()?;
+        for root_dir_str in args[2..].into_iter() {
+            let root_dir_str = shellexpand::tilde(root_dir_str);
+
+            let mut root_dir = PathBuf::new();
+            root_dir.push(root_dir_str.clone().as_ref());
+
+            sync_stream.put(root_dir);
+        }
     }
-    sync_stream.as_ref().put(root_dir);
 
     let mut workers = Vec::with_capacity(core_count);
     for _ in 0..core_count {
