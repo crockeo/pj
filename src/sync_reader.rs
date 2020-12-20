@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 
 pub trait SyncStream {
@@ -125,12 +124,7 @@ impl<T> SyncStream for SwapSyncStream<T> {
                     return None;
                 }
 
-                // TODO: this impl is actually slower than the Mutex, I think it's because we waste
-                // a lot of time with both the reader_ and writer_state locked to do this move.
-                // Instead we ought to:
-                //   - Represent read_state.elements as a RefCell
-                //   - Use RefCell.replace (which just swaps pointers?) to "move" data between them
-                drain_extend(&mut read_state.elements, &mut write_state);
+                std::mem::swap(&mut read_state.elements, &mut write_state);
                 self.swap_evt.notify_all();
                 continue;
             }
@@ -141,22 +135,6 @@ impl<T> SyncStream for SwapSyncStream<T> {
     fn put(&self, value: Self::Item) {
         let mut write_state = self.write_state.lock().unwrap();
         write_state.push(value);
-    }
-
-    fn extend(&self, values: Vec<Self::Item>) {
-        let mut write_state = self.write_state.lock().unwrap();
-        write_state.extend(values);
-    }
-}
-
-fn drain_extend<T>(target: &mut Vec<T>, source: &mut Vec<T>) {
-    let new_len = target.len() + source.len();
-    if new_len > target.capacity() {
-        target.reserve(new_len - target.capacity());
-    }
-
-    for item in source.drain(0..) {
-        target.push(item);
     }
 }
 

@@ -14,8 +14,7 @@ use crate::sync_reader::SyncStream;
 fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
     target: Arc<String>,
     sync_stream: Arc<T>,
-) -> io::Result<Vec<PathBuf>> {
-    let mut found_paths = Vec::new();
+) -> io::Result<()> {
     while let Some(path_buf) = sync_stream.get() {
         let mut candidate_subpaths: Vec<PathBuf> = Vec::new();
         let mut found_sentinel = false;
@@ -30,7 +29,7 @@ fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
                 .to_str()
                 .expect("failed to convert OsStr->str");
             if file_name == target.as_ref() {
-                found_paths.push(path_buf);
+                println!("{}", path_buf.to_str().expect("invalid path"));
                 found_sentinel = true;
                 break;
             }
@@ -45,7 +44,7 @@ fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
         }
     }
 
-    Ok(found_paths)
+    Ok(())
 }
 
 fn main() -> io::Result<()> {
@@ -81,13 +80,8 @@ fn main() -> io::Result<()> {
         }));
     }
 
-    for path in workers.into_iter().flat_map(|w| {
-        w.join()
-            .expect("failed to join thread")
-            .expect("thread failed to execute")
-    }) {
-        println!("{}", path.to_str().expect("invalid path"));
+    for worker in workers.into_iter() {
+        worker.join().unwrap().unwrap();
     }
-
     Ok(())
 }
