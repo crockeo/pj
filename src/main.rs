@@ -19,23 +19,22 @@ fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
         let mut candidate_subpaths: Vec<PathBuf> = Vec::new();
         let mut found_sentinel = false;
 
-        for sub_path in path_buf.read_dir()? {
-            let sub_path = sub_path?.path();
+        for dir_entry in path_buf.read_dir()? {
+            let dir_entry = match dir_entry {
+                Err(_) => continue,
+                Ok(dir_entry) => dir_entry,
+            };
 
-            let file_name = sub_path
-                .as_path()
-                .file_name()
-                .expect("failed to get file name")
-                .to_str()
-                .expect("failed to convert OsStr->str");
+            let raw_file_name = dir_entry.file_name();
+            let file_name = raw_file_name.to_str().expect("failed to convert OsStr -> str");
             if file_name == target.as_ref() {
-                println!("{}", path_buf.to_str().expect("invalid path"));
+                println!("{}", dir_entry.path().to_str().unwrap());
                 found_sentinel = true;
                 break;
             }
 
-            if sub_path.is_dir() {
-                candidate_subpaths.push(sub_path);
+            if dir_entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+                candidate_subpaths.push(dir_entry.path());
             }
         }
 
