@@ -145,7 +145,11 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    fn run_sync_stream_test<T: SyncStream<Item = i64> + Send + Sync + 'static, F : Fn(usize) -> T>(make_sync_stream: F, thread_count: i64) {
+    fn run_sync_stream_test<T, F>(make_sync_stream: F, thread_count: i64)
+    where
+        T: SyncStream<Item = i64> + Send + Sync + 'static,
+        F: Fn(usize) -> T,
+    {
         let sync_stream = Arc::new(make_sync_stream(thread_count as usize));
 
         let step = 1000 / thread_count;
