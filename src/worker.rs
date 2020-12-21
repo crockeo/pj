@@ -1,4 +1,3 @@
-use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -31,12 +30,16 @@ impl<T: SyncStream<Item = WorkItem>> WorkTarget<T> {
 
 pub fn finder_worker<T: SyncStream<Item = WorkItem>>(
     target: Arc<WorkTarget<T>>,
-) -> io::Result<()> {
+) {
     while let Some(work_item) = target.sync_stream.get() {
         let mut candidate_subpaths = Vec::new();
         let mut found_sentinel = false;
 
-        for dir_entry in work_item.path.read_dir()?.filter_map(|dir_entry| dir_entry.ok()) {
+        let dir_entries = match work_item.path.read_dir() {
+            Err(_) => continue,
+            Ok(x) => x,
+        };
+        for dir_entry in dir_entries.filter_map(|dir_entry| dir_entry.ok()) {
             let raw_file_name = dir_entry.file_name();
             let file_name = raw_file_name
                 .to_str()
@@ -59,6 +62,4 @@ pub fn finder_worker<T: SyncStream<Item = WorkItem>>(
             target.sync_stream.extend(candidate_subpaths);
         }
     }
-
-    Ok(())
 }
