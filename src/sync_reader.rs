@@ -9,7 +9,7 @@ pub trait SyncStream {
 
     // default extend assumes no special circumstances about knowing the length of the values ahead
     // of time. can be overriden to optimize for specific implementations
-    fn extend(&self, values: Vec<Self::Item>) {
+    fn extend<I: IntoIterator<Item = Self::Item>>(&self, values: I) {
         for value in values.into_iter() {
             self.put(value);
         }
@@ -57,7 +57,7 @@ impl<T> SyncStream for MutexSyncStream<T> {
         self.state_change.notify_one();
     }
 
-    fn extend(&self, values: Vec<Self::Item>) {
+    fn extend<I: IntoIterator<Item = Self::Item>>(&self, values: I) {
         let mut state = self.state.lock().unwrap();
         if state.is_stalled() {
             panic!("attempted to write to stream after it was closed");
@@ -84,7 +84,7 @@ impl<T> MutexSyncStreamState<T> {
 
     fn with_threads(thread_count: usize) -> Self {
         Self {
-            thread_count: thread_count,
+            thread_count,
             waiting_count: 0,
             elements: Vec::new(),
         }

@@ -1,7 +1,9 @@
 extern crate num_cpus;
 extern crate shellexpand;
+extern crate structopt;
 
 pub mod sync_reader;
+pub mod worker;
 
 use std::env;
 use std::io;
@@ -9,75 +11,52 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
+use structopt::StructOpt;
+
 use crate::sync_reader::SyncStream;
 
-fn finder_worker<T: sync_reader::SyncStream<Item = PathBuf>>(
-    target: Arc<String>,
-    sync_stream: Arc<T>,
-) -> io::Result<()> {
-    while let Some(path_buf) = sync_stream.get() {
-        let mut candidate_subpaths: Vec<PathBuf> = Vec::new();
-        let mut found_sentinel = false;
+fn main() -> io::Result<()> {
+    let args = Opt::from_args();
 
-        for dir_entry in path_buf.read_dir()?.filter_map(|dir_entry| dir_entry.ok()) {
-            let raw_file_name = dir_entry.file_name();
-            let file_name = raw_file_name
-                .to_str()
-                .expect("failed to convert OsStr -> str");
-            if file_name == target.as_ref() {
-                println!("{}", dir_entry.path().to_str().unwrap());
-                found_sentinel = true;
-                break;
-            }
+    let cpus = num_cpus::get();
+    let work_target = Arc::new(worker::WorkTarget {
+        sentinel_name: args.sentinel_name,
+        sync_stream: sync_reader::SwapSyncStream::with_threads(cpus),
+        max_depth: args.depth,
+    });
 
-            if dir_entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
-                candidate_subpaths.push(dir_entry.path());
-            }
-        }
+    let mut root_dirs = args.root_dirs;
+    if root_dirs.len() == 0 {
+        root_dirs.push(env::current_dir()?);
+    }
+    work_target.sync_stream.extend(
+        root_dirs
+            .into_iter()
+            .map(|path| worker::WorkItem { path, depth: 0 }),
+    );
 
-        if !found_sentinel {
-            sync_stream.extend(candidate_subpaths);
-        }
+    let mut workers = Vec::with_capacity(cpus);
+    for _ in 0..cpus {
+        let work_target = work_target.clone();
+        workers.push(thread::spawn(move || worker::finder_worker(work_target)));
+    }
+
+    for worker in workers.into_iter() {
+        worker
+            .join()
+            .expect("failed to join worker")
+            .expect("worker encountered an error");
     }
 
     Ok(())
 }
 
-fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        println!("Usage: pj <sentinel file name> [root directory]");
-        return Ok(());
-    }
+#[derive(StructOpt)]
+#[structopt(name = "pj", about = "A fast sentinel file finder.")]
+struct Opt {
+    sentinel_name: String,
+    root_dirs: Vec<PathBuf>,
 
-    let core_count = num_cpus::get();
-    let sync_stream = Arc::new(sync_reader::SwapSyncStream::with_threads(core_count));
-
-    let sentinel_name = Arc::new(args[1].clone());
-    if args.len() == 2 {
-        sync_stream.put(env::current_dir()?);
-    } else {
-        for root_dir_str in args[2..].into_iter() {
-            let root_dir_str = shellexpand::tilde(root_dir_str);
-
-            let mut root_dir = PathBuf::new();
-            root_dir.push(root_dir_str.clone().as_ref());
-
-            sync_stream.put(root_dir);
-        }
-    }
-
-    let mut workers = Vec::with_capacity(core_count);
-    for _ in 0..core_count {
-        let sentinel_name = sentinel_name.clone();
-        let sync_stream = sync_stream.clone();
-        workers.push(thread::spawn(move || {
-            finder_worker(sentinel_name, sync_stream)
-        }));
-    }
-
-    for worker in workers.into_iter() {
-        worker.join().unwrap().unwrap();
-    }
-    Ok(())
+    #[structopt(short, long)]
+    depth: Option<usize>,
 }
