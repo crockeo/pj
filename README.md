@@ -4,41 +4,60 @@ Simple unix command line tool to find occurrences of sentinel files in a
 directory structure. Kind of like your favorite `grep` but it terminates a
 search if it finds a sentinel.
 
+## Why?
+
+I recently moved from [Emacs](https://www.gnu.org/software/emacs/) to
+[Neovim](https://neovim.io/) because I had configured into a hole (see: Emacs
+was freezing and I couldn't figure out why). I really got into the long-living
+editor process, and I wanted to recreate the killer feature that drove it:
+[projectile](https://github.com/bbatsov/projectile).
+
+I found [denite.nvim](https://github.com/Shougo/denite.nvim) which provided me
+file and text search out of the box (more or less), but it couldn't swap between
+projects! I was doomed!
+
+And then I thought "hey I've been intending to learn Rust for a while, what if I
+made a high-perf project finder." Then I did!
+
+Traversing ~16000 directories:
+
+```
+pj .git ~/src  0.28s user 2.15s system 1409% cpu 0.173 total
+```
+
+Traversing a much more reasonable number (that I haven't counted):
+
+```
+pj .git ~/src --depth=2  0.01s user 0.03s system 457% cpu 0.008 total
+```
+
+After I was done with `pj` I just hooked it up into Denite like
+[so](https://github.com/crockeo/nvim/blob/6e19018c9a4d015aaed3dab40b8ce7efee59a60f/rplugin/python3/denite/source/pj.py)
+and then I had my projectile back ❤️.
+
 ## Usage
 
 ```bash
-$ pj # assumes you're looking for .git files
-# src/projectname1 src/projectname2 src/projectname3
-# ...
-
-$ pj .hg # for if you work at Facebook
-no projects found
+$ pj .git ~/src  # searches ~/src for all directories that contain .git, e.g.
+~/src/cool_project_1
+~/src/kind_of_cool_project
+~/src/hip_name
+~/src/sub_dir/buried_project
+...
 ```
 
-Note that this is actaully all fake I haven't made it yet.
+If you know your projects have a relatively flat structure, you can also use
+the `--depth` command to limit the depth of the search:
 
-## Story Time
+```bash
+$ pj .git ~/src --depth=1
+~/src/cool_project_1
+~/src/kind_of_cool_project
+~/src/hip_name
+# does *not* find
+# ~/src/sub_dir/buried_project
+```
 
-Imagine you're running <INSERT FAVORITE EDITOR> and you have the age old
-question: 
+## License
 
-> How do I switch to this other project I'm working on?
-
-You say to yourself, wow it would be nice if I had something like
-[projectile](https://github.com/bbatsov/projectile) now that I'm using Vim. But
-you're not on LISP machine's wild ride any more--you don't get to have a nice
-monoloth. You make your own little
-processes and you put them together until you've gone and made yourself ~a
-robot~ ~a multimillion dollar company~ a cute little house of cards!
-
-So you download [denite](https://github.com/Shougo/denite.nvim) because it's
-pretty cool and then you get text finding (with `ag`) and file finding (also
-with `ag`) and then you're like:
-
-> Wish I could just use `ag` to find my Git repos but I don't want to index all
-> that extra stuff
-
-So you *literally* just make [ripgrep](https://github.com/BurntSushi/ripgrep)
-except worse and it only finds sentinel files.
-
-## License  
+MIT Open Source, refer to `LICENSE` file for details.
