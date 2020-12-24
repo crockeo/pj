@@ -1,4 +1,6 @@
-<img align="left" src="/res/logo.png" />
+<div style="text-align: center;">
+<img align="center" src="/res/logo.png" />
+</div>
 
 Simple unix command line tool to find occurrences of sentinel files in a
 directory structure. Kind of like your favorite `grep` but it terminates a
