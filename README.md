@@ -1,10 +1,16 @@
 # pj
 
-<img src="/res/logo.svg" alt="pj logo">
+<div>
+    <span>
+        <img src="/res/logo.png" alt="pj logo">
+    </span>
 
-Simple unix command line tool to find occurrences of sentinel files in a
-directory structure. Kind of like your favorite `grep` but it terminates a
-search if it finds a sentinel.
+    <span>
+    Simple unix command line tool to find occurrences of sentinel files in a
+    directory structure. Kind of like your favorite `grep` but it terminates a
+    search if it finds a sentinel.
+    </span>
+</div>
 
 ## Why?
 
