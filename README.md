@@ -1,4 +1,4 @@
-<img src="/res/logo.png" alt="pj logo">
+<img align="left" src="/res/logo.png" />
 
 Simple unix command line tool to find occurrences of sentinel files in a
 directory structure. Kind of like your favorite `grep` but it terminates a
@@ -42,7 +42,7 @@ $ pj .git ~/src  # searches ~/src for all directories that contain .git, e.g.
 ~/src/cool_project_1
 ~/src/kind_of_cool_project
 ~/src/hip_name
-~/src/sub_dir/buried_project
+~/src/sub_dir/buried_project!
 ...
 ```
 
