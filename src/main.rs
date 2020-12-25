@@ -1,4 +1,5 @@
 extern crate num_cpus;
+extern crate regex;
 extern crate shellexpand;
 extern crate structopt;
 
@@ -11,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 
+use regex::Regex;
 use structopt::StructOpt;
 
 use crate::sync_reader::SyncStream;
@@ -20,7 +22,7 @@ fn main() -> io::Result<()> {
 
     let cpus = num_cpus::get();
     let work_target = Arc::new(worker::WorkTarget {
-        sentinel_name: args.sentinel_name,
+        sentinel_pattern: args.sentinel_pattern,
         sync_stream: sync_reader::SwapSyncStream::with_threads(cpus),
         max_depth: args.depth,
     });
@@ -60,7 +62,9 @@ fn expand_tilde<P: AsRef<Path>>(path: P) -> PathBuf {
 #[derive(StructOpt)]
 #[structopt(name = "pj", about = "A fast sentinel file finder.")]
 struct Opt {
-    sentinel_name: String,
+    #[structopt(parse(try_from_str = Regex::new))]
+    sentinel_pattern: Regex,
+
     root_dirs: Vec<PathBuf>,
 
     #[structopt(short, long)]

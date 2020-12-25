@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use regex::Regex;
+
 use crate::sync_reader::SyncStream;
 
 // TODO: hide these internal fields and provide a constructor to map from Opt to WorkTarget (with a
@@ -11,7 +13,7 @@ pub struct WorkItem {
 }
 
 pub struct WorkTarget<T: SyncStream<Item = WorkItem>> {
-    pub sentinel_name: String,
+    pub sentinel_pattern: Regex,
     pub sync_stream: T,
     pub max_depth: Option<usize>,
 }
@@ -44,7 +46,7 @@ pub fn finder_worker<T: SyncStream<Item = WorkItem>>(
             let file_name = raw_file_name
                 .to_str()
                 .expect("failed to convert OsStr -> str");
-            if file_name == target.sentinel_name.as_str() {
+            if target.sentinel_pattern.is_match(file_name) {
                 println!("{}", work_item.path.to_str().unwrap());
                 found_sentinel = true;
                 break;
