@@ -9,10 +9,7 @@ use structopt::StructOpt;
 
 fn main() -> anyhow::Result<()> {
     let args = Opt::from_args();
-    let pool = Arc::new(
-        ThreadPoolBuilder::new()
-            .build()?,
-    );
+    let pool = Arc::new(ThreadPoolBuilder::new().build()?);
     let wait_group = WaitGroup::new();
     let sentinel = Arc::new(args.make_sentinel_regex()?);
 
@@ -65,19 +62,16 @@ impl WorkItem {
         let mut found_sentinel = false;
         for dir_entry in self.path.read_dir()?.filter_map(Result::ok) {
             let file_name = dir_entry.file_name();
-            let file_name = file_name.to_str().expect("failed to convert OsStr -> &str");
+            let file_name = file_name.to_str()?;
 
             if self.sentinel.is_match(file_name) {
-                println!(
-                    "{}",
-                    self.path.to_str().expect("Could not convert Path -> &str")
-                );
+                println!("{}", self.path.to_str()?);
                 found_sentinel = true;
                 break;
             }
 
-	    if dir_entry.metadata()?.is_dir() {
-		found_paths.push(dir_entry.path());
+            if dir_entry.metadata()?.is_dir() {
+                found_paths.push(dir_entry.path());
             }
         }
 
