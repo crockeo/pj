@@ -16,45 +16,63 @@ use structopt::StructOpt;
 
 fn main() -> anyhow::Result<()> {
     let args = Opt::from_args();
-    let pool = Arc::new(ThreadPoolBuilder::new().build()?);
     let wait_group = WaitGroup::new();
-    let sentinel = Arc::new(args.make_sentinel_regex()?);
+
+    let ctx = Arc::new(Context {
+	pool: ThreadPoolBuilder::new().build()?,
+	max_depth: args.depth,
+	sentinel: args.make_sentinel_regex()?,
+    });
 
     for root_dir in args.root_dirs.into_iter() {
-        let work_item = WorkItem {
-            pool: pool.clone(),
-            wait_group: wait_group.clone(),
-            max_depth: args.depth,
-            sentinel: sentinel.clone(),
+        let work_item = Job {
+	    ctx: ctx.clone(),
+	    wait_group: wait_group.clone(),
             // TODO: resolve symlinks for original directories(?)
             // I'm not sure if this is needed, because read_dir()
             // might just work through symlinks :)
             path: root_dir,
             depth: 0,
         };
-        pool.spawn(move || work_item.job());
+        ctx.pool.spawn(move || work_item.job());
     }
 
     wait_group.wait();
     Ok(())
 }
 
-struct WorkItem {
-    pool: Arc<ThreadPool>,
-    wait_group: WaitGroup,
+struct Context {
+    pool: ThreadPool,
     max_depth: Option<usize>,
-    sentinel: Arc<Regex>,
+    sentinel: Regex,
+}
+
+impl Context {
+    fn is_match(&self, file_name: &str) -> bool {
+	self.sentinel.is_match(file_name)
+    }
+
+    fn exceeds_max_depth(&self, depth: usize) -> bool {
+	if let Some(max_depth) = self.max_depth {
+	    depth >= max_depth
+	} else {
+	    false
+	}
+    }
+}
+
+struct Job {
+    ctx: Arc<Context>,
+    wait_group: WaitGroup,
     path: PathBuf,
     depth: usize,
 }
 
-impl WorkItem {
+impl Job {
     fn child(&self, new_path: PathBuf) -> Self {
-        WorkItem {
-            pool: self.pool.clone(),
-            wait_group: self.wait_group.clone(),
-            max_depth: self.max_depth,
-            sentinel: self.sentinel.clone(),
+        Job {
+	    ctx: self.ctx.clone(),
+	    wait_group: self.wait_group.clone(),
             path: new_path,
             depth: self.depth + 1,
         }
@@ -65,9 +83,12 @@ impl WorkItem {
             Err(e) => eprintln!("{:?}", e),
             Ok(_) => {}
         }
+	drop(self.wait_group);
     }
 
-    fn job_impl(self) -> anyhow::Result<()> {
+    fn job_impl(&self) -> anyhow::Result<()> {
+	let should_enqueue = !self.ctx.exceeds_max_depth(self.depth + 1);
+
         let mut found_paths = Vec::new();
         let mut found_sentinel = false;
         for dir_entry in self.path.read_dir()?.filter_map(Result::ok) {
@@ -76,7 +97,7 @@ impl WorkItem {
                 .to_str()
                 .ok_or_else(|| anyhow!("Cannot convert file_name {:?} to str", file_name))?;
 
-            if self.sentinel.is_match(file_name) {
+            if self.ctx.is_match(file_name) {
                 println!(
                     "{}",
                     self.path
@@ -86,6 +107,10 @@ impl WorkItem {
                 found_sentinel = true;
                 break;
             }
+
+	    if !should_enqueue {
+		continue;
+	    }
 
             // TODO: make this not loop forever when there are recursive symlinks?
             let mut path = dir_entry.path();
@@ -97,16 +122,10 @@ impl WorkItem {
             }
         }
 
-        if let Some(max_depth) = self.max_depth {
-            if self.depth >= max_depth {
-                return Ok(());
-            }
-        }
-
         if !found_sentinel {
             for found_path in found_paths {
                 let child = self.child(found_path);
-                self.pool.spawn(move || child.job());
+                self.ctx.pool.spawn(move || child.job());
             }
         }
 
