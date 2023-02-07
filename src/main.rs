@@ -1,64 +1,102 @@
-pub mod sync_reader;
-pub mod worker;
-
-use std::env;
-use std::fs;
-use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
 
+use crossbeam::sync::WaitGroup;
+use rayon::ThreadPool;
+use rayon::ThreadPoolBuilder;
 use regex::Regex;
 use structopt::StructOpt;
 
-use crate::sync_reader::SyncStream;
-
-fn main() -> io::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Opt::from_args();
+    let pool = Arc::new(
+        ThreadPoolBuilder::new()
+            .num_threads(num_cpus::get())
+            .build()?,
+    );
+    let wait_group = WaitGroup::new();
+    let sentinel = Arc::new(args.make_sentinel_regex()?);
 
-    // Regex doesn't have a is_full_match function.
-    // We ensure the regex starts with `^` and ends with `$`
-    // so that any match is a full match.
-    let mut sentinel_pattern_str = args.sentinel_pattern;
-    if !sentinel_pattern_str.starts_with("^") {
-        sentinel_pattern_str = format!("^{sentinel_pattern_str}");
-    }
-    if !sentinel_pattern_str.ends_with("$") {
-        sentinel_pattern_str = format!("{sentinel_pattern_str}$");
-    }
-
-    let sentinel_pattern =
-        Regex::new(&sentinel_pattern_str).expect("Failed to create Regex from provided sentinel");
-
-    let cpus = num_cpus::get();
-    let work_target = Arc::new(worker::WorkTarget {
-        sentinel_pattern,
-        sync_stream: sync_reader::SwapSyncStream::with_threads(cpus),
-        max_depth: args.depth,
-    });
-
-    let mut root_dirs = args.root_dirs;
-    if root_dirs.len() == 0 {
-        root_dirs.push(env::current_dir()?);
-    }
-    work_target
-        .sync_stream
-        .extend(root_dirs.into_iter().map(|path| worker::WorkItem {
-            path: fs::canonicalize(path).expect("Could not canonicalize path"),
+    for root_dir in args.root_dirs.into_iter() {
+        let work_item = WorkItem {
+            pool: pool.clone(),
+	    wait_group: wait_group.clone(),
+            max_depth: args.depth,
+            sentinel: sentinel.clone(),
+            path: root_dir,
             depth: 0,
-        }));
-
-    let mut workers = Vec::with_capacity(cpus);
-    for _ in 0..cpus {
-        let work_target = work_target.clone();
-        workers.push(thread::spawn(move || worker::finder_worker(work_target)));
+        };
+        pool.spawn(move || work_item.job());
     }
 
-    for worker in workers.into_iter() {
-        worker.join().expect("failed to join worker");
-    }
-
+    wait_group.wait();
     Ok(())
+}
+
+struct WorkItem {
+    pool: Arc<ThreadPool>,
+    wait_group: WaitGroup,
+    max_depth: Option<usize>,
+    sentinel: Arc<Regex>,
+    path: PathBuf,
+    depth: usize,
+}
+
+impl WorkItem {
+    fn child(&self, new_path: PathBuf) -> Self {
+        WorkItem {
+            pool: self.pool.clone(),
+	    wait_group: self.wait_group.clone(),
+            max_depth: self.max_depth,
+            sentinel: self.sentinel.clone(),
+            path: new_path,
+            depth: self.depth + 1,
+        }
+    }
+
+    fn job(self) {
+        match self.job_impl() {
+            Err(e) => eprintln!("{:?}", e),
+            Ok(_) => {}
+        }
+    }
+
+    fn job_impl(self) -> anyhow::Result<()> {
+        let mut found_paths = Vec::new();
+        let mut found_sentinel = false;
+        for dir_entry in self.path.read_dir()?.filter_map(Result::ok) {
+            let file_name = dir_entry.file_name();
+            let file_name = file_name.to_str().expect("failed to convert OsStr -> &str");
+
+            if self.sentinel.is_match(file_name) {
+                println!(
+                    "{}",
+                    self.path.to_str().expect("Could not convert Path -> &str")
+                );
+                found_sentinel = true;
+                break;
+            }
+
+            if dir_entry.metadata()?.is_dir() {
+		found_paths.push(dir_entry.path());
+            }
+        }
+
+        if let Some(max_depth) = self.max_depth {
+            if self.depth >= max_depth {
+                return Ok(());
+            }
+        }
+
+        if !found_sentinel {
+            for found_path in found_paths {
+                let child = self.child(found_path);
+                self.pool.spawn(move || child.job());
+            }
+        }
+
+	Ok(())
+    }
 }
 
 #[derive(StructOpt)]
@@ -70,4 +108,24 @@ struct Opt {
 
     #[structopt(short, long)]
     depth: Option<usize>,
+}
+
+impl Opt {
+    fn make_sentinel_regex(&self) -> anyhow::Result<Regex> {
+        // Regex doesn't have a is_full_match function.
+        // We ensure the regex starts with `^` and ends with `$`
+        // so that any match is a full match.
+        let prefix = if self.sentinel_pattern.starts_with("^") {
+            ""
+        } else {
+            "^"
+        };
+        let suffix = if self.sentinel_pattern.ends_with("$") {
+            ""
+        } else {
+            "$"
+        };
+        let sentinel_str = format!("{prefix}{}{suffix}", self.sentinel_pattern);
+        Ok(Regex::new(&sentinel_str)?)
+    }
 }
