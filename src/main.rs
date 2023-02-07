@@ -9,7 +9,7 @@ pub mod worker;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
@@ -21,9 +21,23 @@ use crate::sync_reader::SyncStream;
 fn main() -> io::Result<()> {
     let args = Opt::from_args();
 
+    // Regex doesn't have a is_full_match function.
+    // We ensure the regex starts with `^` and ends with `$`
+    // so that any match is a full match.
+    let mut sentinel_pattern_str = args.sentinel_pattern;
+    if !sentinel_pattern_str.starts_with("^") {
+        sentinel_pattern_str = format!("^{sentinel_pattern_str}");
+    }
+    if !sentinel_pattern_str.ends_with("$") {
+        sentinel_pattern_str = format!("{sentinel_pattern_str}$");
+    }
+
+    let sentinel_pattern =
+        Regex::new(&sentinel_pattern_str).expect("Failed to create Regex from provided sentinel");
+
     let cpus = num_cpus::get();
     let work_target = Arc::new(worker::WorkTarget {
-        sentinel_pattern: args.sentinel_pattern,
+        sentinel_pattern,
         sync_stream: sync_reader::SwapSyncStream::with_threads(cpus),
         max_depth: args.depth,
     });
@@ -35,7 +49,7 @@ fn main() -> io::Result<()> {
     work_target
         .sync_stream
         .extend(root_dirs.into_iter().map(|path| worker::WorkItem {
-	    path: fs::canonicalize(path).expect("Could not canonicalize path"),
+            path: fs::canonicalize(path).expect("Could not canonicalize path"),
             depth: 0,
         }));
 
@@ -55,8 +69,7 @@ fn main() -> io::Result<()> {
 #[derive(StructOpt)]
 #[structopt(name = "pj", about = "A fast sentinel file finder.")]
 struct Opt {
-    #[structopt(parse(try_from_str = Regex::new))]
-    sentinel_pattern: Regex,
+    sentinel_pattern: String,
 
     root_dirs: Vec<PathBuf>,
 
