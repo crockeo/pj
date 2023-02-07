@@ -11,7 +11,6 @@ fn main() -> anyhow::Result<()> {
     let args = Opt::from_args();
     let pool = Arc::new(
         ThreadPoolBuilder::new()
-            .num_threads(num_cpus::get())
             .build()?,
     );
     let wait_group = WaitGroup::new();
@@ -20,7 +19,7 @@ fn main() -> anyhow::Result<()> {
     for root_dir in args.root_dirs.into_iter() {
         let work_item = WorkItem {
             pool: pool.clone(),
-	    wait_group: wait_group.clone(),
+            wait_group: wait_group.clone(),
             max_depth: args.depth,
             sentinel: sentinel.clone(),
             path: root_dir,
@@ -46,7 +45,7 @@ impl WorkItem {
     fn child(&self, new_path: PathBuf) -> Self {
         WorkItem {
             pool: self.pool.clone(),
-	    wait_group: self.wait_group.clone(),
+            wait_group: self.wait_group.clone(),
             max_depth: self.max_depth,
             sentinel: self.sentinel.clone(),
             path: new_path,
@@ -77,7 +76,7 @@ impl WorkItem {
                 break;
             }
 
-            if dir_entry.metadata()?.is_dir() {
+	    if dir_entry.metadata()?.is_dir() {
 		found_paths.push(dir_entry.path());
             }
         }
@@ -95,7 +94,7 @@ impl WorkItem {
             }
         }
 
-	Ok(())
+        Ok(())
     }
 }
 

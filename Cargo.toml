@@ -9,7 +9,9 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.69"
 crossbeam = "0.8.2"
-num_cpus = "1.13.0"
 rayon = "1.6.1"
 regex = "1.4.2"
 structopt = "0.3.21"
+
+[profile.release]
+debug = true
