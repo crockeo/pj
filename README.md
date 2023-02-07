@@ -8,11 +8,11 @@ It comes with a nice `--help` command :)
 
 ```shell
 $ pj --help
-pj 0.1.2
+pj 0.2.0
 A fast sentinel file finder.
 
 USAGE:
-    pj [OPTIONS] <sentinel-pattern> [root-dirs]...
+    pj [OPTIONS] <sentinel-pattern> [--] [root-dirs]...
 
 FLAGS:
     -h, --help       Prints help information
@@ -20,16 +20,17 @@ FLAGS:
 
 OPTIONS:
     -d, --depth <depth>
+        --ignore <ignore>...
 
 ARGS:
     <sentinel-pattern>
-    <root-dirs>...
-```
+    <root-dirs>...```
 
-For example, find all of your git repositories under your ~/src directory:
+For example, find all of your git repositories under your ~/src directory
+while ignoring directories `go`, `venv` and `node_modules`:
 
 ```shell
-pj '\.git' ~/src
+pj '\.git' --ignore go venv node_modules -- ~/src
 ```
 
 ## License

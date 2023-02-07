@@ -1,6 +1,6 @@
 [package]
 name = "pj"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["Cerek Hillen <chillen@lyft.com>"]
 edition = "2021"
 
