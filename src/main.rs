@@ -7,6 +7,7 @@ pub mod sync_reader;
 pub mod worker;
 
 use std::env;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,11 +32,12 @@ fn main() -> io::Result<()> {
     if root_dirs.len() == 0 {
         root_dirs.push(env::current_dir()?);
     }
-    work_target.sync_stream.extend(
-        root_dirs
-            .into_iter()
-            .map(|path| worker::WorkItem { path: expand_tilde(path), depth: 0 }),
-    );
+    work_target
+        .sync_stream
+        .extend(root_dirs.into_iter().map(|path| worker::WorkItem {
+	    path: fs::canonicalize(path).expect("Could not canonicalize path"),
+            depth: 0,
+        }));
 
     let mut workers = Vec::with_capacity(cpus);
     for _ in 0..cpus {
@@ -44,19 +46,10 @@ fn main() -> io::Result<()> {
     }
 
     for worker in workers.into_iter() {
-        worker
-            .join()
-            .expect("failed to join worker");
+        worker.join().expect("failed to join worker");
     }
 
     Ok(())
-}
-
-fn expand_tilde<P: AsRef<Path>>(path: P) -> PathBuf {
-    // TODO: smooth this out a little bit to be more rustic...whatever that means
-    let mut buf = PathBuf::new();
-    buf.push(shellexpand::tilde(path.as_ref().to_str().unwrap()).into_owned());
-    buf
 }
 
 #[derive(StructOpt)]
