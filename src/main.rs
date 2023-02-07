@@ -22,6 +22,7 @@ fn main() -> anyhow::Result<()> {
 	pool: ThreadPoolBuilder::new().build()?,
 	max_depth: args.depth,
 	sentinel: args.make_sentinel_regex()?,
+	ignore: args.ignore,
     });
 
     for root_dir in args.root_dirs.into_iter() {
@@ -45,6 +46,7 @@ struct Context {
     pool: ThreadPool,
     max_depth: Option<usize>,
     sentinel: Regex,
+    ignore: Vec<String>,
 }
 
 impl Context {
@@ -58,6 +60,15 @@ impl Context {
 	} else {
 	    false
 	}
+    }
+
+    fn should_ignore(&self, file_name: &str) -> bool {
+	for candidate in self.ignore.iter() {
+	    if candidate == file_name {
+		return true;
+	    }
+	}
+	false
     }
 }
 
@@ -96,6 +107,10 @@ impl Job {
             let file_name = file_name
                 .to_str()
                 .ok_or_else(|| anyhow!("Cannot convert file_name {:?} to str", file_name))?;
+
+	    if self.ctx.should_ignore(file_name) {
+		continue
+	    }
 
             if self.ctx.is_match(file_name) {
                 println!(
@@ -142,6 +157,9 @@ struct Opt {
 
     #[structopt(short, long)]
     depth: Option<usize>,
+
+    #[structopt(long)]
+    ignore: Vec<String>,
 }
 
 impl Opt {
