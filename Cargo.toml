@@ -1,6 +1,6 @@
 [package]
 name = "pj"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Cerek Hillen <chillen@lyft.com>"]
 edition = "2018"
 
@@ -9,5 +9,4 @@ edition = "2018"
 [dependencies]
 num_cpus = "1.13.0"
 regex = "1.4.2"
-shellexpand = "2.0.0"
 structopt = "0.3.21"

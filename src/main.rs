@@ -1,8 +1,3 @@
-extern crate num_cpus;
-extern crate regex;
-extern crate shellexpand;
-extern crate structopt;
-
 pub mod sync_reader;
 pub mod worker;
 
