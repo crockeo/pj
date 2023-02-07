@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use crossbeam::sync::WaitGroup;
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
@@ -62,10 +63,17 @@ impl WorkItem {
         let mut found_sentinel = false;
         for dir_entry in self.path.read_dir()?.filter_map(Result::ok) {
             let file_name = dir_entry.file_name();
-            let file_name = file_name.to_str()?;
+            let file_name = file_name
+                .to_str()
+                .ok_or_else(|| anyhow!("Cannot convert file_name {:?} to str", file_name))?;
 
             if self.sentinel.is_match(file_name) {
-                println!("{}", self.path.to_str()?);
+                println!(
+                    "{}",
+                    self.path
+                        .to_str()
+                        .ok_or_else(|| anyhow!("Cannot convert path {:?} to str", self.path))?
+                );
                 found_sentinel = true;
                 break;
             }
