@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -20,6 +21,9 @@ fn main() -> anyhow::Result<()> {
             wait_group: wait_group.clone(),
             max_depth: args.depth,
             sentinel: sentinel.clone(),
+	    // TODO: resolve symlinks for original directories(?)
+	    // I'm not sure if this is needed, because read_dir()
+	    // might just work through symlinks :)
             path: root_dir,
             depth: 0,
         };
@@ -78,9 +82,14 @@ impl WorkItem {
                 break;
             }
 
-            if dir_entry.metadata()?.is_dir() {
+	    // TODO: make this not loop forever when there are recursive symlinks?
+	    let mut path = dir_entry.path();
+	    while path.is_symlink() {
+		path = fs::read_link(path)?;
+	    }
+	    if path.is_dir() {
                 found_paths.push(dir_entry.path());
-            }
+	    }
         }
 
         if let Some(max_depth) = self.max_depth {
